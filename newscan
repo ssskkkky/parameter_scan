@@ -1,0 +1,310 @@
+#!/bin/bash
+# This tool is used to sbatch many jobs according to the parameter table in $configFile
+# Name the sbatch script with now time
+
+inputFile='gtc.in'
+# parameter table
+copyFile=(gtc gtc.in test.in job.* *.py )
+linkFile=(maxwell.dat spdata.dat profile.dat )
+
+function getParameter(){
+
+}
+
+function helpFunction(){
+    echo "-b for batchFile"
+    echo "-c for configFile"
+    echo "-f only copy"
+    echo "-h print this message"
+    echo "-r runmode,0 for pool submit,1 for direct run,AND 2 for direct submit"
+    exit
+}
+
+
+function copyF(){
+    cp $inputFile $dir
+    
+    if [ -n "$batchFile" ]
+    then
+	cp $batchFile $dir
+    fi
+    
+    cp $configFile $dir
+    for cpFile in ${copyFile[*]}
+    do
+	cp $cpFile $dir
+    done
+
+    for cpFile in ${linkFile[*]}
+    do
+	cp -sf $PWD/$cpFile $PWD/$dir
+    done
+}
+
+
+while getopts ":b:c:r:h:f" arg; do
+    case $arg in
+	b) batchFile=$OPTARG;;
+	c) configFile=$OPTARG;;
+	r) runModeIn=$OPTARG;;
+	f) onlyCp=True;;
+	?) helpFunction;;
+    esac
+done
+
+
+
+if [ -z "$configFile" ]
+then
+    configFile='test.in'
+fi
+
+if [ -z "$batchFile" ]
+then
+    echo "!!!!!You didn't give me a batch script"
+    echo "Are you sure you want to mpirun your job in current node?"
+    echo "Enter for yes any other input would be no"
+    echo "when no I will use the default scipt"
+    read input
+    echo input is $input
+    if [[ $input == 'yes' ]]
+    then
+	runMode=1
+    else
+	runMode=0
+	batchFile='job.kylin2'
+    fi
+fi
+
+if ! [ -z "$runModeIn" ]
+then
+    runMode=`expr $runModeIn`
+fi  
+
+function modifyParameter(){
+    mkdir -p "$4"
+    filename="$1"
+    parameter="$2"
+    paraValue="$3"
+    # pattern='/''?<='$parameter'/'
+    pattern='s/\('$parameter'.*=\)\(.*\)\(!.*\)/\1'${paraValue}'\3/g'
+    pattern='s/\(^[[:space:]]*\b'$parameter'\b\([^=]*\)=\)\([^!]*\)\(!*.*\)/\1'te\ st'\t\4/g'
+    pattern='s/\(^[[:space:]]*\b'n_modes'\b\([^=]*\)=\)\([^!]*\)\(!*.*\)/\1'"$paraValue"'\t\4/g'
+    sed -i 's/\(^[[:space:]]*\b'$parameter'\b\([^=]*\)=\)\([^!]*\)\(!*.*\)/\1'"$paraValue"'\t\4/g' $filename
+}
+
+function modifyBatchFileJParameter(){
+    filename=$1
+    time=`date +%d_%H_%M`
+    pattern='s/\(SBATCH.*J\).*/\1\t'$time'/g'
+    sed -i $pattern $filename 
+}
+
+
+function modifyFile(){
+    let "j=1"
+    while(($j<=$numLine))
+	 #second loop to modify gtc.in
+    do
+	# parameter=`awk 'NR=='$j'{print $1}' $configFile`
+	parameter=`awk -F "#" 'NR=='$j'{print $1}' $configFile | awk '{print $1}'`
+	
+	multiNumber=`awk -F "#" 'NR=='$j'{print $1}' $configFile | awk '/;/'`
+	if [ -z "$multiNumber" ]
+	then
+	    parameter=`awk -F "#" 'NR=='$j'{print $1}' $configFile | awk '{print $1}'`
+	else
+	    parameter=`awk -F ";" 'NR=='$j'{print $1}' $configFile | awk '{print $1}'`
+	fi
+
+	
+	# skip blank line
+	while [ -z "$parameter" ]
+	do
+	    let "j++"
+	    [ $j -gt $numLine ]&&break 2
+	    # multiNumber=`awk -F ";" 'NR=='$j'{print}' $configFile | awk '/;/'`
+	    multiNumber=`awk -F "#" 'NR=='$j'{print $1}' $configFile | awk '/;/'`
+	    if [ -z "$multiNumber" ]
+	    then
+		parameter=`awk -F "#" 'NR=='$j'{print $1}' $configFile | awk '{print $1}'`
+	    else
+		parameter=`awk -F ";" 'NR=='$j'{print $1}' $configFile | awk '{print $1}'`
+	    fi
+
+	done
+
+	
+	if [ -z "$multiNumber" ]
+	then
+	    nParameter=`awk -F "#" 'NR=='$j'{print $1}' $configFile | awk '{print $'$i'}'`
+	    if [ -z "$nParameter" ]
+	    then
+		nParameter=`awk -F "#" 'NR=='$j'{print $1}' $configFile| awk '{print $2}'`
+	    fi
+	else
+	    nParameter=`awk -F "#" 'NR=='$j'{print $1}' $configFile | awk -F ";" '{print $'$i'}'`
+	    if [ -z "$nParameter" ]
+	    then
+		nParameter=`awk -F "#" 'NR=='$j'{print $1}' $configFile| awk -F ";" '{print $2}'`
+	    fi		
+	fi
+	let "j++"
+	modifyParameter $dir'/'$inputFile $parameter "$nParameter" $dir
+    done
+}
+
+
+function giveFileName(){
+    let "j=1"
+    dir=''
+    while(($j<=$numLine))
+	 # first loop to decide dir name
+    do
+	# multiNumber=`awk -F ";" 'NR=='$j'{print}' $configFile | awk '/;/'`
+	multiNumber=`awk -F "#" 'NR=='$j'{print $1}' $configFile | awk '/;/'`
+	if [ -z "$multiNumber" ]
+	then
+	    parameter=`awk -F "#" 'NR=='$j'{print $1}' $configFile | awk '{print $1}'`
+	else
+	    parameter=`awk -F "#" 'NR=='$j'{print $1}' $configFile | awk -F ";" '{print $1}'`
+	fi
+	# skip blank line
+	while [ -z "$parameter" ]
+	do
+	    let "j++"
+	    [ $j -gt $numLine ]&&break 2
+	    multiNumber=`awk -F "#" 'NR=='$j'{print $1}' $configFile | awk '/;/'`
+	    if [ -z "$multiNumber" ]
+	    then
+		parameter=`awk -F "#" 'NR=='$j'{print $1}' $configFile | awk '{print $1}'`
+	    else
+		parameter=`awk -F "#" 'NR=='$j'{print $1}' $configFile | awk -F ";" '{print $1}'`
+	    fi
+
+	done
+	dir=$dir`echo $parameter | sed 's/^\w\|\s\w/\U&/g'`
+	nParameter=`awk 'NR=='$j'{print $'$i'}' $configFile`
+	
+	
+	# if [ -z "$multiNumber" ]
+	# then
+	#     nParameter=`awk -F "#" 'NR=='$j'{print $1}' $configFile | awk '{print $'$i'}'`
+	#     if [ -z "$nParameter" ]
+	#     then
+	#     	nParameter=`awk -F "#" 'NR=='$j'{print $1}' $configFile | awk -F ";" '{print $'$i'}'`
+	#     fi		
+	# else
+	#     nParameter=`awk -F "#" 'NR=='$j'{print $1}' $configFile | awk -F ";" '{print $'$i'}'`
+	#     if [ -z "$nParameter" ]
+	#     then
+	# 	nParameter=`awk -F "#" 'NR=='$j'{print $1}' $configFile | awk -F ";" '{print $'$i'}'`
+	#     fi		
+	# fi
+
+
+
+	if [ -z "$multiNumber" ]
+	then
+	    nParameter=`awk -F "#" 'NR=='$j'{print $1}' $configFile | awk '{print $'$i'}'`
+	    if [ -z "$nParameter" ]
+	    then
+		nParameter=`awk -F "#" 'NR=='$j'{print $1}' $configFile| awk '{print $2}'`
+	    fi
+	else
+	    nParameter=`awk -F "#" 'NR=='$j'{print $1}' $configFile | awk -F ";" '{print $'$i'}'`
+	    if [ -z "$nParameter" ]
+	    then
+		nParameter=`awk -F "#" 'NR=='$j'{print $1}' $configFile| awk -F ";" '{print $2}'`
+	    fi		
+	fi
+
+	if [ -z "$multiNumber" ]
+	then	    
+       	    dir=$dir'Eq'$nParameter
+	else
+	    firstArg=`echo $nParameter |awk '{print $1}'`
+	    dir=$dir'Eq'$firstArg
+	    echo what is nParameter?: $firstArg
+	fi
+	let "j++"
+    done
+}
+
+function run(){
+    if [ -z "$runMode" ] || [[ $runMode -eq 0 ]]
+    then
+       	modifyBatchFileJParameter $batchFile
+	pushPool.sh sbatch $batchFile
+    elif [[ $runMode -eq 1 ]]
+    then	
+	mkdir -p restart_dir1
+	mkdir -p restart_dir2
+	mkdir -p phi_dir
+	mkdir -p trackp_dir
+	mkdir -p trackp_dirPsiThetaToRZ
+	mkdir -p snapshots_dir
+	nohup mpirun -np 13 ./gtc &
+    elif [[ $runMode -eq 2 ]]
+    then       
+	 modifyBatchFileJParameter $batchFile
+	 sbatch $batchFile
+    else
+	echo Alert! no such runmode:$runMode
+	exit
+    fi
+}
+
+
+
+#row number
+numLine=`awk  'END{print NR}' $configFile`
+
+#Column number
+let "j=1"
+numColumn=0
+while(($j<=$numLine))
+do
+    # multiNumber=`awk -F ";" 'NR=='$j'{print}' $configFile | awk '/;/'`
+    multiNumber=`awk -F "#" 'NR=='$j'{print $1}' $configFile | awk '/;/'`
+    if [ -z "$multiNumber" ]
+    then
+	numColumnn=`awk -F "#" 'NR=='$j'{print $1}' $configFile | awk '{print NF}'`
+    else
+	numColumnn=`awk -F "#" 'NR=='$j'{print $1}' $configFile | awk -F ";" '{print NF}'`
+    fi
+
+    if [ -z "$numColumnn" ]
+    then
+	let "numColumn=0"
+    fi
+    if [ $numColumnn -gt $numColumn ]
+    then
+	let "numColumn=numColumnn"
+    fi
+    let "j++"
+done
+
+
+i=2
+while(($i<=$numColumn))
+do
+    giveFileName
+    
+    echo working dir is $dir
+    echo config file is $config
+    echo batch script is $batchFile
+    mkdir -p $dir
+    copyF
+
+    modifyFile
+    
+    # cd in to sbatch and then cd out
+    if [ -z $onlyCp ]
+    then
+	cd $dir
+	run
+	cd ..
+    fi
+    let "i++"
+done

@@ -1,0 +1,66 @@
+#!/bin/bash
+# This tool is used to sbatch many jobs according to the parameter table in $configFile
+# Name the sbatch script with now time
+
+
+function helpFunction(){
+    echo "-n nmodes should be an array like \"4 5 6\" "
+    echo "-q for qfactor"
+    echo "-h print this message"
+    exit
+}
+
+
+while getopts ":n:q:r:h" arg; do
+    case $arg in
+	n) nmodes=$OPTARG;;
+	q) qnum=$OPTARG;;
+	r) runMode=$OPTARG;;
+	?) helpFunction;;
+    esac
+done
+
+nstr="n_modes"
+mstr="m_modes"
+for i in $nmodes
+do
+    nmode=$i
+    
+    nstr=$nstr" ; "
+    for i in {1..8}
+    do
+	nstr=$nstr" "$nmode
+    done
+
+    mstr=$mstr" ; "
+    if [ -z "$runMode" ] || [[ $runMode -eq 0 ]]
+    then
+
+	for i in {1..8}
+	do
+    	    mmode=$(echo $nmode $qnum $i | awk '{printf("%i",$1*$2+$3-4+0.5)}')
+    	    mstr=$mstr" "$mmode
+	done
+
+    elif [[ $runMode -eq 1 ]]
+    then
+	for i in {4..8}
+	do
+	    mmode=$(echo $nmode $qnum $i | awk '{printf("%i",$1*$2+$3-4+0.5)}')
+	    mstr=$mstr" "$mmode
+	done
+	
+	for i in {1..3}
+	do
+	    mmode=$(echo $nmode $qnum $i | awk '{printf("%i",$1*$2+$3-4+0.5)}')
+	    mstr=$mstr" "$mmode
+	done
+    else
+	echo Alert! no such runmode:$runMode
+	exit
+    fi
+	    
+done
+
+echo $nstr
+echo $mstr
